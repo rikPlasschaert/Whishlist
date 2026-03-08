@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Wishlist (No-Cloud Version)</title>
+    <title>My Wishlist</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -24,7 +24,6 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // Constants
         const SCRAPE_DO_TOKEN = "38ce259dcf6348e189b93804ca2f95b1a77692955fd";
         const STORAGE_KEY = 'my_wishlist_data_v1';
 
@@ -56,7 +55,6 @@
             const [activeCategory, setActiveCategory] = useState('ALL');
             const [error, setError] = useState(null);
 
-            // Sync with LocalStorage whenever items change
             useEffect(() => {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
             }, [items]);
@@ -86,6 +84,7 @@
                 };
 
                 const title = extractMeta('title') || extractMeta('og:title') || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim()) || "New Product";
+                const desc = extractMeta('description') || extractMeta('og:description') || "";
                 
                 let image = extractMeta('image') || extractMeta('og:image') || extractMeta('twitter:image');
                 if (!image) {
@@ -105,17 +104,51 @@
                 }
                 if (!brand) brand = title.split(/[|\-]/)[0].trim().split(" ")[0].replace(/[^a-zA-Z0-9]/g, "");
 
-                let category = extractMeta('category') || extractMeta('product:category');
+                // --- Improved Category Logic ---
+                let category = extractMeta('category') || extractMeta('product:category') || extractMeta('product:section');
+                
+                // Fallback 1: JSON-LD Breadcrumbs
                 if (!category) {
                     const bcMatch = html.match(/"ListItem"[^}]+?"name"\s*:\s*"([^"]+)"/gi);
-                    category = bcMatch && bcMatch.length > 1 ? bcMatch[bcMatch.length-1].match(/"name"\s*:\s*"([^"]+)"/i)?.[1] : "Other";
+                    if (bcMatch && bcMatch.length > 1) {
+                        // Get second to last breadcrumb if possible
+                        const target = bcMatch[bcMatch.length - 2] || bcMatch[bcMatch.length - 1];
+                        category = target.match(/"name"\s*:\s*"([^"]+)"/i)?.[1];
+                    }
                 }
-                if (!category || category === "Other") {
-                    const parts = title.split(/[|]/);
-                    category = parts.length > 1 ? parts[1].trim() : "OTHER";
-                }
-                if (category.toLowerCase().includes("game") || title.toLowerCase().includes("ps5")) category = "GAMING";
 
+                // Fallback 2: Title Splitting (Ensuring it's not the brand)
+                if (!category || category.toLowerCase() === brand.toLowerCase()) {
+                    const parts = title.split(/[|]/);
+                    if (parts.length > 1) {
+                        const potential = parts[1].trim();
+                        if (potential.toLowerCase() !== brand.toLowerCase()) {
+                            category = potential;
+                        }
+                    }
+                }
+
+                // Fallback 3: Keyword Search (Crucial for "Fotocamera" etc)
+                const fullText = (title + " " + desc + " " + category).toLowerCase();
+                const categoryKeywords = {
+                    "FOTOCAMERA": ["camera", "fotocamera", "dslr", "mirrorless", "body", "eos", "lumix", "alpha"],
+                    "LENS": ["lens", "objectief", "mm f/", "zoom lens", "prime lens"],
+                    "GAMING": ["ps5", "playstation", "xbox", "nintendo", "switch", "gaming", "game console", "controller"],
+                    "LAPTOP": ["laptop", "macbook", "notebook", "chromebook"],
+                    "SMARTPHONE": ["smartphone", "iphone", "galaxy", "pixel", "mobile phone"],
+                    "AUDIO": ["headphone", "speaker", "audio", "earbuds", "soundbar"]
+                };
+
+                for (const [key, keywords] of Object.entries(categoryKeywords)) {
+                    if (keywords.some(k => fullText.includes(k))) {
+                        category = key;
+                        break;
+                    }
+                }
+
+                if (!category || category === "Other") category = "OTHER";
+
+                // --- Price ---
                 let priceVal = null;
                 const priceMetaTags = ['price:amount', 'amount', 'price'];
                 for (let tag of priceMetaTags) {
@@ -155,7 +188,7 @@
                     setItems([data, ...items]);
                     setUrlInput('');
                 } catch (err) {
-                    setError("Scraper failed. Some sites block price checks.");
+                    setError("Scraper failed. Check the link or your token.");
                 } finally {
                     setAdding(false);
                 }
@@ -176,7 +209,8 @@
 
             const filteredItems = useMemo(() => {
                 return items.filter(item => {
-                    const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase());
+                    const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                         item.brand.toLowerCase().includes(searchTerm.toLowerCase());
                     const matchesCat = activeCategory === 'ALL' || item.category === activeCategory;
                     return matchesSearch && matchesCat;
                 });
@@ -199,7 +233,7 @@
                                     className="flex-1 bg-white border border-slate-200 px-4 py-2 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm shadow-sm"
                                     required
                                 />
-                                <button type="submit" disabled={adding} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold flex items-center gap-2">
+                                <button type="submit" disabled={adding} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95">
                                     {adding ? <div className="w-4 h-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div> : <Icon name="plus" className="w-4 h-4" />}
                                     <span className="hidden sm:inline">Add</span>
                                 </button>
@@ -212,7 +246,7 @@
 
                     <main className="max-w-6xl mx-auto px-4 py-8">
                         {error && (
-                            <div className="mb-6 p-4 bg-red-50 text-red-700 border border-red-100 rounded-2xl flex items-center gap-3">
+                            <div className="mb-6 p-4 bg-red-50 text-red-700 border border-red-100 rounded-2xl flex items-center gap-3 animate-pulse">
                                 <Icon name="alert" />
                                 <span className="text-sm font-bold">{error}</span>
                             </div>
@@ -223,46 +257,61 @@
                                 {cats.map(c => (
                                     <button 
                                         key={c} onClick={() => setActiveCategory(c)}
-                                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeCategory === c ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-500'}`}
+                                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeCategory === c ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-300'}`}
                                     >
                                         {c}
                                     </button>
                                 ))}
                             </div>
-                            <input 
-                                type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                                className="px-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-sm w-full md:w-64"
-                                placeholder="Search wishlist..."
-                            />
+                            <div className="relative">
+                                <div className="absolute left-3 top-2.5 text-slate-400"><Icon name="search" className="w-4 h-4" /></div>
+                                <input 
+                                    type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                                    className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-sm w-full md:w-64 focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm"
+                                    placeholder="Search wishlist..."
+                                />
+                            </div>
                         </div>
 
                         {filteredItems.length > 0 ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                                 {filteredItems.map(item => (
-                                    <div key={item.id} className="bg-white rounded-[32px] border border-slate-200 overflow-hidden flex flex-col group hover:shadow-xl transition-all duration-300">
+                                    <div key={item.id} className="bg-white rounded-[32px] border border-slate-200 overflow-hidden flex flex-col group hover:shadow-2xl hover:-translate-y-1.5 transition-all duration-500">
                                         <div className="product-image-container">
-                                            {item.image ? <img src={item.image} className="product-image" loading="lazy" /> : <Icon name="image" className="opacity-10 w-12 h-12" />}
+                                            {item.image ? (
+                                                <img src={item.image} alt={item.title} className="product-image" loading="lazy" onError={(e) => {e.target.style.display='none'}} />
+                                            ) : (
+                                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 opacity-10">
+                                                    <Icon name="image" className="w-12 h-12" />
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="p-6 flex-1 flex flex-col">
                                             <div className="flex justify-between items-start mb-3">
                                                 <span className="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">{item.category}</span>
-                                                <button onClick={() => removeItem(item.id)} className="text-slate-200 hover:text-red-500"><Icon name="trash" className="w-4 h-4" /></button>
+                                                <button onClick={() => removeItem(item.id)} className="text-slate-200 hover:text-red-500 transition-colors p-1"><Icon name="trash" className="w-4 h-4" /></button>
                                             </div>
-                                            <h3 className="font-bold text-lg leading-tight mb-1 line-clamp-2">{item.title}</h3>
+                                            <h3 className="font-bold text-lg leading-tight mb-1 line-clamp-2" title={item.title}>{item.title}</h3>
                                             <div className="text-slate-400 text-[11px] font-bold mb-4 uppercase tracking-widest">{item.brand}</div>
-                                            <div className="mt-auto inline-flex bg-slate-900 text-white px-4 py-2 rounded-2xl font-black text-xl">{item.price}</div>
+                                            <div className="mt-auto inline-flex bg-slate-900 text-white px-4 py-2 rounded-2xl font-black text-xl tracking-tight shadow-md">{item.price}</div>
                                         </div>
-                                        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-                                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter truncate max-w-[100px]">{item.domain}</span>
-                                            <a href={item.url} target="_blank" className="text-indigo-600 font-bold text-xs flex items-center gap-1">Shop <Icon name="external" className="w-3 h-3" /></a>
+                                        <div className="px-6 py-5 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
+                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                <div className="w-6 h-6 rounded bg-white border border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-400 uppercase">{item.domain?.charAt(0)}</div>
+                                                <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter truncate max-w-[80px]">{item.domain}</span>
+                                            </div>
+                                            <a href={item.url} target="_blank" rel="noopener noreferrer" className="bg-white px-4 py-2 rounded-xl border border-indigo-100 text-indigo-600 font-bold text-xs flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
+                                                Shop <Icon name="external" className="w-3.5 h-3.5" />
+                                            </a>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         ) : (
-                            <div className="py-40 text-center border-2 border-dashed border-slate-200 rounded-[40px] text-slate-400">
-                                <Icon name="bag" className="mx-auto w-12 h-12 mb-4 opacity-10" />
-                                <p className="font-bold uppercase tracking-widest">No items found</p>
+                            <div className="py-40 text-center border-2 border-dashed border-slate-200 rounded-[40px] text-slate-400 bg-white shadow-inner">
+                                <Icon name="bag" className="mx-auto w-16 h-16 mb-6 opacity-5" />
+                                <h2 className="text-xl font-bold text-slate-800 mb-2">Wishlist is empty</h2>
+                                <p className="text-sm">Paste a product link above to track your items.</p>
                             </div>
                         )}
                     </main>
